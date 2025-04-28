@@ -138,6 +138,7 @@
         
         .chart-container {
             width: 100%;
+            height: 300px;
             margin: 20px 0;
         }
         
@@ -188,7 +189,6 @@
             margin-top: 20px;
         }
 
-        /* Improved symptom checkbox alignment */
         .symptoms-container {
             display: grid;
             grid-template-columns: 1fr 1fr;
@@ -230,9 +230,14 @@
             .symptoms-container {
                 grid-template-columns: 1fr;
             }
+            .chart-container {
+                height: 250px;
+            }
         }
     </style>
+    <!-- Load Chart.js from CDN -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Load html2canvas from CDN -->
     <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
 </head>
 <body>
@@ -285,7 +290,7 @@
             </select>
             
             <label for="duration">If diabetic, how many years since diagnosis?</label>
-            <input type="number" id="duration" name="duration" min="0" max="100" value="0">
+            <input type="number" id="duration" name="duration" min="0" max="100" value="0" disabled>
             
             <label for="family_history">Family history of kidney disease?</label>
             <select id="family_history" name="family_history" required>
@@ -296,12 +301,14 @@
                 <option value="both">Yes (parents and siblings)</option>
             </select>
             
-            <label for="family_diseases">If family history, what conditions? (Select all that apply)</label>
-            <div class="symptoms-container">
-                <label><input type="checkbox" name="family_diseases" value="ckd"> Chronic Kidney Disease</label>
-                <label><input type="checkbox" name="family_diseases" value="diabetes"> Diabetes</label>
-                <label><input type="checkbox" name="family_diseases" value="hypertension"> Hypertension</label>
-                <label><input type="checkbox" name="family_diseases" value="heart"> Heart Disease</label>
+            <div id="family-diseases-container" style="display: none;">
+                <label>If family history, what conditions? (Select all that apply)</label>
+                <div class="symptoms-container">
+                    <label><input type="checkbox" name="family_diseases" value="ckd"> Chronic Kidney Disease</label>
+                    <label><input type="checkbox" name="family_diseases" value="diabetes"> Diabetes</label>
+                    <label><input type="checkbox" name="family_diseases" value="hypertension"> Hypertension</label>
+                    <label><input type="checkbox" name="family_diseases" value="heart"> Heart Disease</label>
+                </div>
             </div>
             
             <label for="bmi">Body Mass Index (BMI):</label>
@@ -421,7 +428,6 @@
     </footer>
 
     <div id="chatbot-container">
-        <iframe id="chatbot-iframe" src="https://agent.jotform.com/0195bf7a139274149d20a98efdf483b08976"></iframe>
         <button id="chatbot-toggle">💬</button>
     </div>
 
@@ -429,9 +435,55 @@
         let userRiskData = {};
         let riskCharts = {};
         
-        document.getElementById('ckd-form').addEventListener('submit', function(e) {
-            e.preventDefault();
+        // Initialize form event listeners
+        document.addEventListener('DOMContentLoaded', function() {
+            // Diabetes duration field control
+            document.getElementById('diabetes').addEventListener('change', function() {
+                const durationField = document.getElementById('duration');
+                if (this.value === 'type1' || this.value === 'type2') {
+                    durationField.disabled = false;
+                    durationField.required = true;
+                } else {
+                    durationField.disabled = true;
+                    durationField.required = false;
+                    durationField.value = '0';
+                }
+            });
             
+            // Family diseases container control
+            document.getElementById('family_history').addEventListener('change', function() {
+                const container = document.getElementById('family-diseases-container');
+                if (this.value !== 'no') {
+                    container.style.display = 'block';
+                } else {
+                    container.style.display = 'none';
+                    document.querySelectorAll('input[name="family_diseases"]').forEach(el => el.checked = false);
+                }
+            });
+            
+            // Form submission
+            document.getElementById('ckd-form').addEventListener('submit', function(e) {
+                e.preventDefault();
+                calculateRisk();
+            });
+            
+            // Reset button
+            document.getElementById('reset-btn').addEventListener('click', function() {
+                resetForm();
+            });
+            
+            // Download buttons
+            document.getElementById('download-image').addEventListener('click', downloadAsImage);
+            document.getElementById('download-text').addEventListener('click', downloadTextReport);
+            
+            // Chatbot toggle
+            document.getElementById('chatbot-toggle').addEventListener('click', function() {
+                const container = document.getElementById('chatbot-container');
+                container.classList.toggle('chatbot-visible');
+            });
+        });
+        
+        function calculateRisk() {
             // Gather form data
             const age = parseInt(document.getElementById('age').value);
             const sex = document.getElementById('sex').value;
@@ -621,31 +673,41 @@
             };
             
             // Display results
+            displayResults();
+            createVisualizations();
+            
+            // Show results and scroll to them
+            document.getElementById('result').classList.remove('hidden');
+            document.getElementById('visualizations').classList.remove('hidden');
+            document.getElementById('result').scrollIntoView({ behavior: 'smooth' });
+        }
+        
+        function displayResults() {
             const riskMessage = document.getElementById('risk-message');
             riskMessage.innerHTML = `
-                <p>Your calculated CKD risk score: <strong>${riskScore}/20</strong></p>
-                <p>Risk level: <span class="risk-${riskLevel}">${riskLevel.toUpperCase()}</span></p>
-                <p>Estimated 5-year risk of developing CKD: ${riskPercentage}</p>
+                <p>Your calculated CKD risk score: <strong>${userRiskData.riskScore}/20</strong></p>
+                <p>Risk level: <span class="risk-${userRiskData.riskLevel}">${userRiskData.riskLevel.toUpperCase()}</span></p>
+                <p>Estimated 5-year risk of developing CKD: ${userRiskData.riskPercentage}</p>
             `;
             
             const riskExplanation = document.getElementById('risk-explanation');
             riskExplanation.innerHTML = `
                 <h3>Key Risk Factors Identified:</h3>
                 <ul>
-                    ${age >= 50 ? `<li>Age (${age} years)</li>` : ''}
-                    ${race === 'black' ? '<li>African American ethnicity</li>' : ''}
-                    ${hypertension !== 'no' ? `<li>${hypertension === 'yes' ? 'Hypertension' : 'Borderline hypertension'}</li>` : ''}
-                    ${diabetes !== 'no' ? `<li>${diabetes === 'type1' ? 'Type 1 Diabetes' : diabetes === 'type2' ? 'Type 2 Diabetes' : 'Prediabetes'}${duration > 0 ? ` (${duration} years)` : ''}</li>` : ''}
-                    ${family_history !== 'no' ? `<li>Family history of kidney disease (${familyDiseasesText ? familyDiseasesText : 'unspecified conditions'})</li>` : ''}
-                    ${bmi >= 30 ? `<li>Obesity (BMI ${bmi})</li>` : bmi >= 25 ? `<li>Overweight (BMI ${bmi})</li>` : ''}
-                    ${smoking === 'current' ? '<li>Current smoker</li>' : smoking === 'former' ? '<li>Former smoker</li>' : ''}
-                    ${cardiovascular === 'yes' ? '<li>History of cardiovascular disease</li>' : ''}
-                    ${symptoms > 0 ? `<li>${symptoms} potential CKD symptom(s)</li>` : ''}
+                    ${userRiskData.age >= 50 ? `<li>Age (${userRiskData.age} years)</li>` : ''}
+                    ${userRiskData.race === 'black' ? '<li>African American ethnicity</li>' : ''}
+                    ${userRiskData.hypertension !== 'no' ? `<li>${userRiskData.hypertension === 'yes' ? 'Hypertension' : 'Borderline hypertension'}</li>` : ''}
+                    ${userRiskData.diabetes !== 'no' ? `<li>${userRiskData.diabetes === 'type1' ? 'Type 1 Diabetes' : userRiskData.diabetes === 'type2' ? 'Type 2 Diabetes' : 'Prediabetes'}${userRiskData.duration > 0 ? ` (${userRiskData.duration} years)` : ''}</li>` : ''}
+                    ${userRiskData.family_history !== 'no' ? `<li>Family history of kidney disease (${userRiskData.familyDiseasesText ? userRiskData.familyDiseasesText : 'unspecified conditions'})</li>` : ''}
+                    ${userRiskData.bmi >= 30 ? `<li>Obesity (BMI ${userRiskData.bmi})</li>` : userRiskData.bmi >= 25 ? `<li>Overweight (BMI ${userRiskData.bmi})</li>` : ''}
+                    ${userRiskData.smoking === 'current' ? '<li>Current smoker</li>' : userRiskData.smoking === 'former' ? '<li>Former smoker</li>' : ''}
+                    ${userRiskData.cardiovascular === 'yes' ? '<li>History of cardiovascular disease</li>' : ''}
+                    ${userRiskData.symptoms > 0 ? `<li>${userRiskData.symptoms} potential CKD symptom(s)</li>` : ''}
                 </ul>
             `;
             
             const advice = document.getElementById('advice');
-            if (riskLevel === 'high') {
+            if (userRiskData.riskLevel === 'high') {
                 advice.innerHTML = `
                     <h3>Recommendations:</h3>
                     <p>You have several risk factors for chronic kidney disease. We strongly recommend:</p>
@@ -657,10 +719,10 @@
                         <li>Dietary modifications (reduce sodium, moderate protein intake)</li>
                         <li>Smoking cessation if applicable</li>
                         <li>Weight management if overweight</li>
-                        ${family_history !== 'no' ? '<li>Discuss family screening options with your doctor</li>' : ''}
+                        ${userRiskData.family_history !== 'no' ? '<li>Discuss family screening options with your doctor</li>' : ''}
                     </ul>
                 `;
-            } else if (riskLevel === 'moderate') {
+            } else if (userRiskData.riskLevel === 'moderate') {
                 advice.innerHTML = `
                     <h3>Recommendations:</h3>
                     <p>You have some risk factors for chronic kidney disease. We recommend:</p>
@@ -671,7 +733,7 @@
                         <li>Maintain a healthy lifestyle with regular exercise</li>
                         <li>Consider annual kidney function screening if you have multiple risk factors</li>
                         <li>Avoid NSAID pain medications if possible</li>
-                        ${family_history !== 'no' ? '<li>Be aware of your family history and monitor for symptoms</li>' : ''}
+                        ${userRiskData.family_history !== 'no' ? '<li>Be aware of your family history and monitor for symptoms</li>' : ''}
                     </ul>
                 `;
             } else {
@@ -684,21 +746,11 @@
                         <li>Exercise regularly</li>
                         <li>Avoid excessive use of pain medications that can harm kidneys</li>
                         <li>Get regular check-ups with your doctor</li>
-                        ${family_history !== 'no' ? '<li>Be aware of your family history as it may increase your risk</li>' : ''}
+                        ${userRiskData.family_history !== 'no' ? '<li>Be aware of your family history as it may increase your risk</li>' : ''}
                     </ul>
                 `;
             }
-            
-            // Show results and visualizations
-            document.getElementById('result').classList.remove('hidden');
-            document.getElementById('visualizations').classList.remove('hidden');
-            
-            // Create visualizations
-            createVisualizations();
-            
-            // Scroll to results
-            document.getElementById('result').scrollIntoView({ behavior: 'smooth' });
-        });
+        }
         
         function createVisualizations() {
             createRiskLevelChart();
@@ -715,7 +767,7 @@
             }
             
             const riskLevels = ['Low', 'Moderate', 'High'];
-            const riskScores = [5, 9, 15]; // Max scores for each category
+            const riskScores = [5, 9, 15];
             const userScore = userRiskData.riskScore;
             
             let userPosition;
@@ -744,6 +796,7 @@
                 },
                 options: {
                     responsive: true,
+                    maintainAspectRatio: false,
                     scales: {
                         y: {
                             beginAtZero: true,
@@ -782,12 +835,10 @@
                 riskCharts.factorsChart.destroy();
             }
             
-            // Get top factors that contributed to the score (value > 0)
             const topFactors = [...userRiskData.riskFactors]
                 .filter(factor => factor.value > 0)
                 .sort((a, b) => b.value - a.value);
             
-            // If we have more than 6 factors, group the smaller ones into "Other"
             let labels, values, colors, otherFactors = [];
             if (topFactors.length > 6) {
                 const mainFactors = topFactors.slice(0, 5);
@@ -803,7 +854,6 @@
                 colors = ['#1a6fc9', '#27ae60', '#f39c12', '#e74c3c', '#9b59b6', '#3498db'].slice(0, topFactors.length);
             }
             
-            // Calculate total of displayed factors for percentage calculation
             const total = values.reduce((sum, value) => sum + value, 0);
             
             riskCharts.factorsChart = new Chart(ctx, {
@@ -819,6 +869,7 @@
                 },
                 options: {
                     responsive: true,
+                    maintainAspectRatio: false,
                     plugins: {
                         title: {
                             display: true,
@@ -831,7 +882,6 @@
                                     const percentage = Math.round((value / total) * 100);
                                     let label = context.label || '';
                                     
-                                    // Add family history details if available
                                     if (label.includes('Family history') && userRiskData.familyDiseasesText) {
                                         label += ` (${userRiskData.familyDiseasesText})`;
                                     }
@@ -879,7 +929,6 @@
                 }]
             });
             
-            // Update the legend with more details
             const legendContainer = document.getElementById('factors-legend');
             legendContainer.innerHTML = `
                 <p><strong>Key contributing factors to your score:</strong></p>
@@ -940,6 +989,7 @@
                 },
                 options: {
                     responsive: true,
+                    maintainAspectRatio: false,
                     scales: {
                         y: {
                             beginAtZero: true,
@@ -1005,8 +1055,7 @@
             });
         }
         
-        // Download report as image
-        document.getElementById('download-image').addEventListener('click', function() {
+        function downloadAsImage() {
             const element = document.getElementById('visualization-content');
             
             html2canvas(element).then(canvas => {
@@ -1015,10 +1064,9 @@
                 link.href = canvas.toDataURL('image/png');
                 link.click();
             });
-        });
+        }
         
-        // Download text report
-        document.getElementById('download-text').addEventListener('click', function() {
+        function downloadTextReport() {
             const riskMessage = document.getElementById('risk-message').textContent;
             const riskExplanation = document.getElementById('risk-explanation').textContent;
             const advice = document.getElementById('advice').textContent;
@@ -1049,50 +1097,21 @@ Generated on: ${new Date().toLocaleDateString()}
             link.click();
             document.body.removeChild(link);
             URL.revokeObjectURL(url);
-        });
+        }
         
-        // Reset button functionality
-        document.getElementById('reset-btn').addEventListener('click', function() {
+        function resetForm() {
             document.getElementById('ckd-form').reset();
             document.getElementById('result').classList.add('hidden');
             document.getElementById('visualizations').classList.add('hidden');
+            document.getElementById('family-diseases-container').style.display = 'none';
+            document.getElementById('duration').disabled = true;
             window.scrollTo({ top: 0, behavior: 'smooth' });
             
             Object.values(riskCharts).forEach(chart => {
                 if (chart) chart.destroy();
             });
             riskCharts = {};
-        });
-        
-        // Show/hide diabetes duration based on diabetes status
-        document.getElementById('diabetes').addEventListener('change', function() {
-            const durationField = document.getElementById('duration');
-            if (this.value === 'type1' || this.value === 'type2') {
-                durationField.disabled = false;
-                durationField.required = true;
-            } else {
-                durationField.disabled = true;
-                durationField.required = false;
-                durationField.value = '0';
-            }
-        });
-        
-        // Show/hide family diseases based on family history
-        document.getElementById('family_history').addEventListener('change', function() {
-            const familyDiseasesContainer = document.querySelector('.symptoms-container');
-            if (this.value !== 'no') {
-                familyDiseasesContainer.style.display = 'grid';
-            } else {
-                familyDiseasesContainer.style.display = 'none';
-                document.querySelectorAll('input[name="family_diseases"]').forEach(el => el.checked = false);
-            }
-        });
-        
-        // Chatbot toggle functionality
-        document.getElementById('chatbot-toggle').addEventListener('click', function() {
-            const container = document.getElementById('chatbot-container');
-            container.classList.toggle('chatbot-visible');
-        });
+        }
     </script>
 </body>
 </html>
